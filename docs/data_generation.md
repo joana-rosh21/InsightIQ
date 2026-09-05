@@ -1,0 +1,3 @@
+# InsightIQ Synthetic Data Generation
+
+The InsightIQ synthetic dataset was generated using seed 42 with a 24-month history from September 1, 2024 through August 31, 2026. The dataset contains 5,000 customers, 300 products, and 20,000 orders. The generator intentionally includes seasonal patterns, customer churn, category-specific returns, festival discounts, and a decline in the South region and Electronics category during the final 90 days.
