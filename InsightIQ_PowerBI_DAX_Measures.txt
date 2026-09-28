@@ -1,0 +1,156 @@
+InsightIQ — Power BI DAX Measures Reference
+==============================================
+Paste these into Power BI as new measures (Modeling tab -> New Measure,
+or right-click the "orders" table -> New Measure). Grouped by which
+dashboard page needs them. Build them in this order — later measures
+reuse earlier ones.
+
+------------------------------------------------------------
+0. DATE TABLE (build this FIRST — everything else depends on it)
+------------------------------------------------------------
+New Table (not a measure):
+
+DateTable =
+CALENDAR(MIN(orders[order_date]), MAX(orders[order_date]))
+
+Then add these calculated columns to DateTable:
+Year        = YEAR(DateTable[Date])
+MonthNum    = MONTH(DateTable[Date])
+MonthName   = FORMAT(DateTable[Date], "MMM YYYY")
+Quarter     = "Q" & QUARTER(DateTable[Date]) & " " & YEAR(DateTable[Date])
+
+After creating DateTable, go to Model view and drag a relationship from
+DateTable[Date] to orders[order_date] (one-to-many, single direction,
+DateTable is the "1" side). This is what makes month-over-month growth,
+date slicers, and trend lines all work correctly.
+
+------------------------------------------------------------
+1. CORE MEASURES (used across every page)
+------------------------------------------------------------
+Total Revenue =
+SUM(orders[revenue])
+
+Total Profit =
+SUM(orders[profit])
+
+Total Orders =
+COUNTROWS(orders)
+
+Total Customers =
+DISTINCTCOUNT(orders[customer_id])
+
+Avg Order Value =
+DIVIDE([Total Revenue], [Total Orders], 0)
+
+Profit Margin % =
+DIVIDE([Total Profit], [Total Revenue], 0)
+
+Return Rate % =
+DIVIDE(
+    CALCULATE([Total Orders], orders[return_status] = "Returned"),
+    [Total Orders], 0
+)
+
+Cancellation Rate % =
+DIVIDE(
+    CALCULATE([Total Orders], orders[return_status] = "Cancelled"),
+    [Total Orders], 0
+)
+
+------------------------------------------------------------
+2. GROWTH & TREND MEASURES (Page 1 + Page 2)
+------------------------------------------------------------
+Revenue Prior Month =
+CALCULATE([Total Revenue], DATEADD(DateTable[Date], -1, MONTH))
+
+Revenue MoM Growth % =
+DIVIDE([Total Revenue] - [Revenue Prior Month], [Revenue Prior Month], 0)
+
+Profit Prior Month =
+CALCULATE([Total Profit], DATEADD(DateTable[Date], -1, MONTH))
+
+Profit MoM Growth % =
+DIVIDE([Total Profit] - [Profit Prior Month], [Profit Prior Month], 0)
+
+------------------------------------------------------------
+3. CUSTOMER MEASURES (Page 1 + Page 3)
+------------------------------------------------------------
+New Customers =
+CALCULATE(
+    DISTINCTCOUNT(customers[customer_id]),
+    USERELATIONSHIP(customers[signup_date], DateTable[Date])
+)
+-- Note: requires a SECOND relationship from DateTable[Date] to
+-- customers[signup_date], set to INACTIVE in Model view (Power BI only
+-- allows one active relationship between two tables). USERELATIONSHIP
+-- activates it just for this measure.
+
+Returning Customers =
+CALCULATE(
+    DISTINCTCOUNT(orders[customer_id]),
+    FILTER(
+        VALUES(orders[customer_id]),
+        CALCULATE(COUNTROWS(orders)) > 1
+    )
+)
+
+Retention Rate % =
+DIVIDE([Returning Customers], [Total Customers], 0)
+
+Churn Rate % (90-day) =
+VAR MaxDate = MAX(orders[order_date])
+VAR ChurnedCustomers =
+    CALCULATE(
+        DISTINCTCOUNT(orders[customer_id]),
+        FILTER(
+            SUMMARIZE(orders, orders[customer_id], "LastOrder", MAX(orders[order_date])),
+            [LastOrder] < MaxDate - 90
+        )
+    )
+RETURN DIVIDE(ChurnedCustomers, [Total Customers], 0)
+-- Matches the churn_rate(90) function from Day 3's customers.py — keep
+-- the 90 in sync with whatever window you settle on there.
+
+Customer Lifetime Value =
+DIVIDE([Total Revenue], [Total Customers], 0)
+-- Average CLV across the filter context. For the ranked per-customer
+-- table on Page 3, just drag customer_id + Total Revenue + Total Profit
+-- into a table visual — no special measure needed.
+
+------------------------------------------------------------
+4. PRODUCT MEASURES (Page 2 + Page 4)
+------------------------------------------------------------
+Revenue Rank =
+RANKX(ALL(products[product_name]), [Total Revenue], , DESC)
+
+Is Top 10 Product =
+IF([Revenue Rank] <= 10, "Top 10", "Other")
+-- Useful as a filter/legend field on the top/bottom product visuals.
+
+Discount Bracket =
+SWITCH(
+    TRUE(),
+    orders[discount] = 0, "No discount",
+    orders[discount] <= 0.10, "1-10%",
+    orders[discount] <= 0.20, "11-20%",
+    "21%+"
+)
+-- Add this as a CALCULATED COLUMN on the orders table (not a measure —
+-- it needs to evaluate per row), then use it as an axis/legend field.
+
+------------------------------------------------------------
+5. OPERATIONS MEASURES (Page 4)
+------------------------------------------------------------
+Avg Delivery Days =
+AVERAGE(orders[delivery_days])
+
+------------------------------------------------------------
+Quick sanity check once these are all in place
+------------------------------------------------------------
+Drop [Total Revenue] and [Total Customers] into two KPI cards with no
+filters applied. They should read the same numbers Day 3's sales.py and
+customers.py printed:
+    Total Revenue   ≈ 41,01,69,080
+    Total Customers = 5,000
+If they don't match, the Date table relationship or the PostgreSQL
+connection is the first thing to check.
