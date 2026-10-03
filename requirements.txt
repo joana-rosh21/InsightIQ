@@ -11,3 +11,4 @@ faker
 matplotlib
 python-dotenv
 joblib
+python-multipart
